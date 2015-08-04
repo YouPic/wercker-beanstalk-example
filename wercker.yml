@@ -1,0 +1,78 @@
+dev:
+  box: youpic/node-beanstalk:0.12.2
+  steps:
+    - nahody/npm-install@1.1.1:
+      environment: development
+    - internal/watch:
+      code: npm run watch
+
+build:
+  box: youpic/node-beanstalk:0.12.2
+  steps:
+    - nahody/npm-install@1.1.1:
+      environment: production
+
+    - script:
+      name: make symlink
+      code: |
+        ln -s $WERCKER_SOURCE_DIR /usr/src/app
+
+    - script:
+      name: export release tag
+      code: |
+        export RELEASE_TAG=$(git describe --tag --exact-match $WERCKER_GIT_COMMIT 2>/dev/null || echo $WERCKER_GIT_COMMIT)
+
+    - script:
+      name: echo release tag
+      code: |
+        echo $RELEASE_TAG
+
+    # Push the image to docker hub
+    - internal/docker-push:
+      username: $DOCKER_USERNAME
+      password: $DOCKER_PASSWORD
+      tag: $RELEASE_TAG
+      repository: example/repository
+      registry: https://registry.hub.docker.com
+      cmd: sh -c 'cd /usr/src/app; npm start'
+
+    - nahody/npm-install@1.1.1:
+      environment: development
+    - npm-test
+
+  after-steps:
+    - slack-notifier:
+      url: $SLACK_WEBHOOK_URL
+      channel: builds
+      username: wercker
+
+deploy:
+  box: youpic/deploy-beanstalk
+  steps:
+    - script:
+      name: export release tag
+      code: |
+        export RELEASE_TAG=$(git describe --tag --exact-match $WERCKER_GIT_COMMIT 2>/dev/null || echo $WERCKER_GIT_COMMIT)
+
+    - script:
+      name: echo release tag
+      code: |
+        echo $RELEASE_TAG
+
+    - script:
+      name: deploy to beanstalk
+      code: |
+        BUCKET="s3-bucket-name"
+        KEY="${RELEASE_TAG}-Dockerrun.aws.json"
+        APP_NAME="name-of-aws-app"
+        ENVIRONMENT_NAME="name-of-aws-environment"
+        sed "s/VERSION/${RELEASE_TAG}/g" ${WERCKER_SOURCE_DIR}/Dockerrun.aws.json.template > ./Dockerrun.aws.json
+        aws s3 cp ./Dockerrun.aws.json "s3://${BUCKET}/${KEY}"
+        if aws elasticbeanstalk create-application-version --application-name $APP_NAME --version-label $RELEASE_TAG --source-bundle S3Bucket=$BUCKET,S3Key=$KEY 2>&1 | grep "InvalidParameterValue.*already exists" || echo $? && (($? == 0)); then echo "Successfully created application"; else echo $?; exit $?; fi;
+        aws elasticbeanstalk update-environment --environment-name $ENVIRONMENT_NAME --version-label $RELEASE_TAG
+
+  after-steps:
+    - slack-notifier:
+      url: $SLACK_WEBHOOK_URL
+      channel: builds
+      username: wercker
