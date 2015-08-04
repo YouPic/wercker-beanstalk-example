@@ -1,0 +1,16 @@
+{
+  "AWSEBDockerrunVersion": "1",
+  "Image": {
+    "Name": "example/repository:VERSION",
+    "Update": "false"
+  },
+  "Authentication": {
+    "Bucket": "s3-bucket-name",
+    "Key": "config.json"
+  },
+  "Ports": [
+    {
+      "ContainerPort": "8080"
+    }
+  ]
+}
